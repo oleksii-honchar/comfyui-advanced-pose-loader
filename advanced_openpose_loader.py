@@ -153,22 +153,14 @@ class AdvancedOpenposeLoader:
             pose_type: Pose type (openpose, openpose_hand, openpose_full, canny, depth, normal)
         
         Returns:
-            PIL Image object of the pose image
-        
-        Raises:
-            FileNotFoundError: If the pose image file does not exist
+            PIL Image object of the pose image, or None if not found
         """
         base = self._get_poses_base_path()
         # Folder-per-pose structure: poses/{folder_name}/{pose_type}.png
         image_path = os.path.join(base, folder_name, f"{pose_type}.png")
 
         if not os.path.exists(image_path):
-            available = self._list_available_poses()
-            available_str = ", ".join(available) if available else "(none)"
-            raise FileNotFoundError(
-                f"Pose image not found: {image_path}\n"
-                f"Available poses: {available_str}"
-            )
+            return None
 
         return Image.open(image_path)
 
@@ -697,6 +689,11 @@ class AdvancedOpenposeLoader:
                 
                 # Load the specific pose image
                 pose_image = self._load_pose_image(folder_name, pose_type)
+                
+                if pose_image is None:
+                    if debug:
+                        print(f"[AdvancedOpenposeLoader] WARNING: {pose_type} image not found, skipping (strength={strength:.2f})")
+                    continue
                 
                 if debug:
                     print(f"[AdvancedOpenposeLoader] Encoding {pose_type} image...")
