@@ -543,13 +543,7 @@ class AdvancedOpenposeLoader:
         # Free temporary tensors before returning
         # control_context is stored in wrapper, safe to delete local ref
         del control_context
-        del pose_image
-        del pose_latent
         del control_model
-        del control_cond
-        del control_uncond
-        del control_latent
-        del control_strength
         
         # Force garbage collection to release VRAM
         import gc
