@@ -516,11 +516,11 @@ class AdvancedOpenposeLoader:
         lat_w = 64
         
         # Create ControlNetWrapper
-        # User specifies strength, wrapper uses 1-strength (inverted)
+        # User specifies strength directly (higher = more control)
         wrapper = ControlNetWrapper(
             controlnet,
             control_context,
-            strength=1.0 - strength,
+            strength=strength,
             ctrl_h=lat_h,
             ctrl_w=lat_w,
             low_vram=True
@@ -543,7 +543,6 @@ class AdvancedOpenposeLoader:
         # Free temporary tensors before returning
         # control_context is stored in wrapper, safe to delete local ref
         del control_context
-        del control_model
         
         # Force garbage collection to release VRAM
         import gc
