@@ -314,6 +314,13 @@ class AdvancedOpenposeLoader:
         """
         # control_latent shape: [B, C, H, W] where C=16 for Flux2 VAE
         # After flatten and permute: [B, H*W, C]
+        print(f"[DEBUG] control_latent.shape before squeeze: {control_latent.shape}")
+        print(f"[DEBUG] control_latent.shape: {control_latent.shape}")
+        print(f"[DEBUG] control_latent.shape: {control_latent.shape}")
+        shape = control_latent.shape
+        if len(shape) == 5:
+            # WanVAE produces 5D tensor (B, T, C, H, W) - squeeze time dim for ControlNet
+            control_latent = control_latent[:, 0, :, :, :]  # Take first time step
         batch_size, channels, h, w = control_latent.shape
         
         # Flatten spatial dimensions and permute to [batch, sequence_length, channels]
@@ -503,8 +510,10 @@ class AdvancedOpenposeLoader:
             control_context = self._apply_spatial_fade(control_context, fade_mask)
         
         # Calculate dimensions for wrapper
-        lat_h = 32
-        lat_w = 32
+        # 1024x1024 output = 64x64 latent (128 downscale)
+        # Was hardcoded 32x32 (512x512), causing pose to only affect 25% of image
+        lat_h = 64
+        lat_w = 64
         
         # Create ControlNetWrapper
         # User specifies strength, wrapper uses 1-strength (inverted)
@@ -530,6 +539,28 @@ class AdvancedOpenposeLoader:
             
             new_metadata['control'] = wrapper
             modified_conditioning.append((cond_tensor, new_metadata))
+        
+        # Free temporary tensors before returning
+        # control_context is stored in wrapper, safe to delete local ref
+        del control_context
+        del pose_image
+        del pose_latent
+        del control_model
+        del control_cond
+        del control_uncond
+        del control_latent
+        del control_strength
+        
+        # Force garbage collection to release VRAM
+        import gc
+        gc.collect()
+        
+        # Clear PyTorch CUDA cache
+        try:
+            import torch
+            torch.cuda.empty_cache()
+        except ImportError:
+            pass
         
         return modified_conditioning
 
@@ -625,7 +656,7 @@ class AdvancedOpenposeLoader:
                               strength_canny=0.0,
                               strength_depth=0.0,
                               strength_normal=0.0,
-                              spatial_fade="none", spatial_fade_strength=0.5, debug=False):
+                              spatial_fade="none", spatial_fade_strength=0.5, debug=False, use_reference_latents=False):
         """
         Load and apply pose guidance using the consolidated pipeline.
 
@@ -702,7 +733,8 @@ class AdvancedOpenposeLoader:
                 pose_latent = self._encode_pose_image(pose_image)
                 
                 # Store reference latents
-                conditioning = self._store_reference_latents(conditioning, pose_latent)
+                if use_reference_latents:
+                    conditioning = self._store_reference_latents(conditioning, pose_latent)
                 
                 if debug:
                     print(f"[AdvancedOpenposeLoader] Applying {pose_type} control (strength={strength:.2f})")
@@ -721,11 +753,62 @@ class AdvancedOpenposeLoader:
         if debug:
             print(f"[AdvancedOpenposeLoader] === Pose loading complete ===")
         
+        # Option 2: Free all auxiliary models and tensors after conditioning is built
+        # Only main model should remain in VRAM for sampling
+        self._cleanup_auxiliary_resources(debug)
+        
+        if debug:
+            print(f"[AdvancedOpenposeLoader] Auxiliary resources freed")
+        
         # Return model, positive conditioning, negative conditioning
         return (model, conditioning, conditioning)
 
 
 # ComfyUI node registration
+    def _cleanup_auxiliary_resources(self, debug=False):
+        """
+        Free all auxiliary models and tensors after conditioning is built.
+        Keeps only the main model for the sampling phase.
+        """
+        # Unload ControlNet model
+        if hasattr(self, '_controlnet_model') and self._controlnet_model is not None:
+            if debug:
+                print(f"[AdvancedOpenposeLoader] Unloading ControlNet model")
+            del self._controlnet_model
+            self._controlnet_model = None
+        
+        # Unload VAE
+        if hasattr(self, '_vae') and self._vae is not None:
+            if debug:
+                print(f"[AdvancedOpenposeLoader] Unloading VAE")
+            del self._vae
+            self._vae = None
+        
+        # Clear cached pose images
+        if hasattr(self, '_pose_images') and self._pose_images is not None:
+            if debug:
+                print(f"[AdvancedOpenposeLoader] Clearing pose images")
+            self._pose_images.clear()
+        
+        # Clear cached pose latents
+        if hasattr(self, '_pose_latents') and self._pose_latents is not None:
+            if debug:
+                print(f"[AdvancedOpenposeLoader] Clearing pose latents")
+            self._pose_latents.clear()
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
+        
+        # Option 3: Clear PyTorch CUDA cache
+        try:
+            import torch
+            torch.cuda.empty_cache()
+            if debug:
+                print(f"[AdvancedOpenposeLoader] CUDA cache cleared")
+        except ImportError:
+            pass
+
 NODE_CLASS_MAPPINGS = {
     "AdvancedOpenposeLoader": AdvancedOpenposeLoader
 }
