@@ -42,7 +42,7 @@ class AdvancedOpenposeLoader:
                 "model": ("MODEL", {}),
                 "conditioning": ("CONDITIONING", {}),
                 "vae": ("VAE", {}),
-                "control_net": ("CONTROL_NET", {}),
+                "control_net": ("FLUX2_FUN_CONTROLNET", {}),
                 "pose_folder_name": ("STRING", {
                     "default": "",
                 }),
