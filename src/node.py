@@ -181,6 +181,7 @@ class AdvancedOpenposeWrapper:
         self.spatial_fade_strength = spatial_fade_strength
         self.poses = []  # List of (pose_type, context) tuples
         self.previous_controlnet = None
+        self.extra_hooks = None  # Required by ComfyUI's get_hooks_from_cond
     
     def get_extra_hooks(self):
         """Return extra hooks for the controlnet.
