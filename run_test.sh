@@ -1,26 +1,36 @@
 #!/usr/bin/env bash
 # run_test.sh - Test Advanced OpenPose Loader without full ComfyUI installation
-# Sets up PYTHONPATH to include cloned dependencies and runs the test suite.
+# Sets up Python virtual environment, installs dependencies, and runs the test suite.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPS_DIR="${SCRIPT_DIR}/deps"
+VENV_DIR="${SCRIPT_DIR}/.venv"
 
 echo "=== Advanced OpenPose Loader Test Suite ==="
-echo "Setting up dependencies..."
+echo "Setting up Python virtual environment..."
 
-# Install Python dependencies
+# Create virtual environment if it doesn't exist
+if [ ! -d "${VENV_DIR}" ]; then
+    python3 -m venv "${VENV_DIR}"
+    echo "✓ Virtual environment created at ${VENV_DIR}"
+else
+    echo "✓ Virtual environment already exists at ${VENV_DIR}"
+fi
+
+# Activate virtual environment
+source "${VENV_DIR}/bin/activate"
+
+echo ""
 echo "Installing Python dependencies..."
-pip3 install -r requirements.txt --quiet
+pip install -r requirements.txt --quiet
+echo "✓ Dependencies installed"
 
 # Set up PYTHONPATH to include cloned deps
 export PYTHONPATH="${DEPS_DIR}/comfyui:${DEPS_DIR}/ComfyUI-Flux2Klein-Enhancer:${DEPS_DIR}/comfyui-flux2fun-controlnet:${DEPS_DIR}/ComfyUI-Multi-Folder-Loader:${SCRIPT_DIR}:${PYTHONPATH}"
 
-echo "PYTHONPATH: ${PYTHONPATH}"
 echo ""
-
-# Run import test
 echo "=== Test 1: Import Advanced OpenPose Loader ==="
 python3 -c "
 import sys
