@@ -32,24 +32,68 @@ DEFAULT_STRENGTHS = {
 }
 
 
+def get_vae_options():
+    """Auto-discover available VAE models."""
+    try:
+        options = list(folder_paths.get_filename_list("vae"))
+    except Exception:
+        options = []
+    if "flux2-vae.safetensors" not in options:
+        options.append("flux2-vae.safetensors")
+    return options, "flux2-vae.safetensors"
+
+
+def get_controlnet_options():
+    """Auto-discover available ControlNet models."""
+    try:
+        options = list(folder_paths.get_filename_list("controlnet"))
+    except Exception:
+        options = []
+    target = "FLUX.2-dev-Fun-Controlnet-Union-2602-fp8.safetensors"
+    if target not in options:
+        options.append(target)
+    return options, target
+
+
+def get_pose_folder_options():
+    """Auto-discover available pose folders."""
+    try:
+        base = "/opt/comfyui/poses"
+        if not os.path.exists(base):
+            return [], ""
+        folders = [f for f in os.listdir(base)
+                   if os.path.isdir(os.path.join(base, f))
+                   and not f.startswith(".")
+                   and not f.startswith("_")]
+    except Exception:
+        folders = []
+    return folders, folders[0] if folders else ""
+
+
 class AdvancedOpenposeLoader:
     """Advanced pose loader with FLUX.2 Fun Control integration."""
 
     @classmethod
     def INPUT_TYPES(cls):
+        vae_options, vae_default = get_vae_options()
+        cn_options, cn_default = get_controlnet_options()
+        folder_options, folder_default = get_pose_folder_options()
+
         return {
             "required": {
                 "model": ("MODEL", {}),
                 "conditioning": ("CONDITIONING", {}),
-                "vae_name": ("STRING", {
-                    "default": "flux2-vae.safetensors",
+                "vae": ("COMBO", {
+                    "values": vae_options,
+                    "default": vae_default,
                 }),
-                "control_net_name": ("STRING", {
-                    "default": "FLUX.2-dev-Fun-Controlnet-Union-2602-fp8.safetensors",
+                "control_net": ("COMBO", {
+                    "values": cn_options,
+                    "default": cn_default,
                 }),
-                "pose_folder_name": ("STRING", {
-                    "default": "test",
-                    "multiline": False,
+                "pose_folder_name": ("COMBO", {
+                    "values": folder_options,
+                    "default": folder_default,
                 }),
             },
             "optional": {
@@ -92,7 +136,7 @@ class AdvancedOpenposeLoader:
     FUNCTION = "execute"
     CATEGORY = "AdvancedPoseLoader"
 
-    def execute(self, model, conditioning, pose_folder_name, vae_name, control_net_name,
+    def execute(self, model, conditioning, pose_folder_name, vae, control_net,
                 pose_types=None, openpose_strength=0.75, openpose_hand_strength=0.80,
                 openpose_full_strength=0.85, canny_strength=0.0, depth_strength=0.0,
                 normal_strength=0.0, spatial_fade=False, spatial_fade_strength=1.0,
@@ -130,8 +174,8 @@ class AdvancedOpenposeLoader:
 
         # Step 4: Load VAE and encode
         if debug:
-            logger.info(f"[AdvancedOpenposeLoader] Loading VAE: {vae_name}")
-        vae_model = self._load_vae(vae_name)
+            logger.info(f"[AdvancedOpenposeLoader] Loading VAE: {vae}")
+        vae_model = self._load_vae(vae)
 
         # Build control contexts
         control_contexts = {}
@@ -157,8 +201,8 @@ class AdvancedOpenposeLoader:
 
         # Step 5: Load ControlNet model once (reused for all pose types)
         if debug:
-            logger.info(f"[AdvancedOpenposeLoader] Loading ControlNet: {control_net_name}")
-        cn_path = folder_paths.get_full_path("controlnet", control_net_name)
+            logger.info(f"[AdvancedOpenposeLoader] Loading ControlNet: {control_net}")
+        cn_path = folder_paths.get_full_path("controlnet", control_net)
         controlnet = self._load_controlnet(cn_path)
 
         # Step 6: Apply FLUX.2 Fun Control via transformer patching
