@@ -188,8 +188,9 @@ class AdvancedOpenposeLoader:
         if debug:
             logger.info(f"[AdvancedOpenposeLoader] Loading VAE: {vae_path}")
         if self.loaded_vae is None or self.loaded_vae._vae_file != vae_path:
-            self.loaded_vae = comfy.sd.VAE()
-            self.loaded_vae.load_vae(vae_path)
+            vae_state_dict = comfy.utils.load_torch_file(vae_path)
+            self.loaded_vae = comfy.sd.VAE(sd=vae_state_dict)
+            self.loaded_vae._vae_file = vae_path
         vae = self.loaded_vae.vae
 
         # Step 2: Resolve pose folder and list pose images
