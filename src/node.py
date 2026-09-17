@@ -36,8 +36,12 @@ def get_vae_options():
     """Auto-discover available VAE models."""
     try:
         options = list(folder_paths.get_filename_list("vae"))
-    except Exception:
+        logger.debug(f"VAE options from get_filename_list: {options}")
+    except Exception as e:
+        logger.debug(f"VAE get_filename_list exception: {e}")
         options = []
+    if not options:
+        logger.warning("No VAE options found, using default")
     if "flux2-vae.safetensors" not in options:
         options.append("flux2-vae.safetensors")
     return options, "flux2-vae.safetensors"
@@ -47,8 +51,12 @@ def get_controlnet_options():
     """Auto-discover available ControlNet models."""
     try:
         options = list(folder_paths.get_filename_list("controlnet"))
-    except Exception:
+        logger.debug(f"ControlNet options from get_filename_list: {options}")
+    except Exception as e:
+        logger.debug(f"ControlNet get_filename_list exception: {e}")
         options = []
+    if not options:
+        logger.warning("No ControlNet options found, using default")
     target = "FLUX.2-dev-Fun-Controlnet-Union-2602-fp8.safetensors"
     if target not in options:
         options.append(target)
