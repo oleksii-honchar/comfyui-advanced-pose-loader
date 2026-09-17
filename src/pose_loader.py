@@ -138,6 +138,8 @@ def load_pose_image(file_path):
         img = Image.open(file_path)
         img = img.convert("RGB")
         pose_tensor = torch.from_numpy(np.array(img, dtype=np.float32))
+        # Add batch dimension (B, H, W, C)
+        pose_tensor = pose_tensor.unsqueeze(0)
         # Convert to [0, 1] range tensor
         if pose_tensor.max() > 1.0:
             pose_tensor = pose_tensor / 255.0
