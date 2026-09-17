@@ -54,6 +54,7 @@ source "${VENV_DIR}/bin/activate"
 echo ""
 echo "Installing Advanced OpenPose Loader dependencies..."
 pip install -r "${REPO_DIR}/requirements.txt" --quiet
+pip install pytest --quiet
 echo "✓ Advanced OpenPose Loader dependencies installed"
 
 echo ""
