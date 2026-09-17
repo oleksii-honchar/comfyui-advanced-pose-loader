@@ -1,48 +1,152 @@
-"""Main AdvancedOpenposeLoader node class.
+"""AdvancedOpenposeLoader node with redesigned interface.
 
-Uses the FLUX.2 Fun ControlNet mechanism by delegating to the working
-Flux2FunControlNetLoader and Flux2FunControlNetApply nodes.
+Loads multiple pose images from a folder, encodes them with VAE,
+builds FLUX.2 Fun ControlNet control contexts, and applies pose
+conditioning via monkey-patching.
 
-This node loads pose images, generates ControlNet conditioning for FLUX.2
-diffusion models, and supports spatial fade masking for natural blending.
+Interface:
+  Required inputs (top):
+    - vae: VAE model dropdown
+    - model: base model
+    - conditioning: conditioning input
+    - controlnet: ControlNet model dropdown
+    - folder_name: pose folder name
+    - strength_openpose: strength slider (default 0.75)
+    - strength_openpose_hand: strength slider (default 0.80)
+    - strength_openpose_full: strength slider (default 0.85)
+    - strength_canny: strength slider (default 0.0)
+    - strength_depth: strength slider (default 0.0)
+    - strength_normal: strength slider (default 0.0)
+
+  Optional inputs (bottom):
+    - spatial_fade: dropdown (none/top/bottom/left/right)
+    - spatial_fade_strength: slider (default 0.5)
+    - debug: boolean toggle
+
+  Outputs:
+    - model: unchanged model
+    - positive: conditioned conditioning
+    - negative: same as positive
 """
 from __future__ import annotations
 
-import os
-import sys
+import logging
 import torch
+import comfy.utils
+import comfy.model_management
+import folder_paths
+
+from src.pose_loader import resolve_pose_folder, list_pose_images, load_pose_image
+from src.pose_preprocessor import resize_to_1024
+from src.multi_pose_encoder import encode_pose_image, build_control_context
+from src.flux2fun_integration import (
+    apply_controlnet_model,
+    patch_transformer_for_control,
+    unpatch_transformer,
+    build_control_chain,
+)
+
+logger = logging.getLogger(__name__)
+
+# Six pose types supported
+POSE_TYPES = [
+    "openpose",
+    "openpose_hand",
+    "openpose_full",
+    "canny",
+    "depth",
+    "normal",
+]
+
+# Default strengths for each pose type
+DEFAULT_STRENGTHS = {
+    "openpose": 0.75,
+    "openpose_hand": 0.80,
+    "openpose_full": 0.85,
+    "canny": 0.0,
+    "depth": 0.0,
+    "normal": 0.0,
+}
+
+
+def get_vae_options():
+    """Auto-discover available VAE models."""
+    try:
+        options = list(folder_paths.get_filename_list("vae"))
+    except Exception:
+        options = []
+    # Ensure flux2-vae.safetensors is always an option (default for FLUX.2)
+    if "flux2-vae.safetensors" not in options:
+        options.append("flux2-vae.safetensors")
+    return options, "flux2-vae.safetensors"
+
+
+def get_controlnet_options():
+    """Auto-discover available ControlNet models."""
+    try:
+        options = list(folder_paths.get_filename_list("controlnet"))
+    except Exception:
+        options = []
+    # Ensure at least one FLUX.2 Fun ControlNet option is available
+    if not any("fun" in name.lower() for name in options):
+        options.append("FLUX.2-dev-Fun-Controlnet-Union-2602-fp8.safetensors")
+    return options, options[0]
+
 
 class AdvancedOpenposeLoader:
-    """Advanced OpenPose ControlNet with spatial fade masking.
+    """Advanced pose conditioning with FLUX.2 Fun ControlNet."""
 
-    Uses the same FLUX.2 Fun ControlNet mechanism as the working photo-pose-use
-    workflow by delegating to Flux2FunControlNetLoader and Flux2FunControlNetApply.
-
-    Supports single pose image or multiple poses (batch) with spatial fade
-    control (vertical/horizontal gradients, corners).
-    """
+    def __init__(self):
+        self.loaded_vae = None
+        self.loaded_controlnets = []
+        self.active_patches = []
 
     @classmethod
     def INPUT_TYPES(cls):
+        vae_options, vae_default = get_vae_options()
+        cn_options, cn_default = get_controlnet_options()
+
         return {
             "required": {
+                "vae": ("COMBO", {"options": vae_options, "default": vae_default}),
                 "model": ("MODEL",),
                 "conditioning": ("CONDITIONING",),
-                "vae": ("VAE",),
-                "controlnet_name": ("COMBO", {
-                    "options": ["FLUX.2-dev-Fun-Controlnet-Union-2602-fp8.safetensors",
-                                "FLUX.2-dev-Fun-Controlnet-Pose-2602-fp8.safetensors"]
+                "controlnet": ("COMBO", {"options": cn_options, "default": cn_default}),
+                "folder_name": ("STRING", {"default": ""}),
+                "strength_openpose": ("FLOAT", {
+                    "default": DEFAULT_STRENGTHS["openpose"],
+                    "min": 0.0, "max": 1.0, "step": 0.01
                 }),
-                "pose_image": ("IMAGE",),
+                "strength_openpose_hand": ("FLOAT", {
+                    "default": DEFAULT_STRENGTHS["openpose_hand"],
+                    "min": 0.0, "max": 1.0, "step": 0.01
+                }),
+                "strength_openpose_full": ("FLOAT", {
+                    "default": DEFAULT_STRENGTHS["openpose_full"],
+                    "min": 0.0, "max": 1.0, "step": 0.01
+                }),
+                "strength_canny": ("FLOAT", {
+                    "default": DEFAULT_STRENGTHS["canny"],
+                    "min": 0.0, "max": 1.0, "step": 0.01
+                }),
+                "strength_depth": ("FLOAT", {
+                    "default": DEFAULT_STRENGTHS["depth"],
+                    "min": 0.0, "max": 1.0, "step": 0.01
+                }),
+                "strength_normal": ("FLOAT", {
+                    "default": DEFAULT_STRENGTHS["normal"],
+                    "min": 0.0, "max": 1.0, "step": 0.01
+                }),
             },
             "optional": {
-                "target_width": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 1}),
-                "target_height": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 1}),
-                "strength": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 2.0, "step": 0.01}),
-                "fade_top": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "fade_bottom": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "fade_left": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "fade_right": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "spatial_fade": ("COMBO", {
+                    "options": ["none", "top", "bottom", "left", "right"],
+                    "default": "none"
+                }),
+                "spatial_fade_strength": ("FLOAT", {
+                    "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01
+                }),
+                "debug": ("BOOLEAN", {"default": False}),
             },
         }
 
@@ -51,107 +155,130 @@ class AdvancedOpenposeLoader:
     FUNCTION = "apply_pose_conditioning"
     CATEGORY = "conditioning/controlnet"
 
-    def _generate_spatial_fade_mask(self, image, fade_top, fade_bottom, fade_left, fade_right):
-        """Generate a spatial fade mask where 1.0 = full strength, 0.0 = no strength."""
-        b, h, w, _ = image.shape
-        mask = torch.ones((1, 1, h, w), dtype=image.dtype, device=image.device)
-
-        if fade_top > 0:
-            top_range = int(h * fade_top)
-            top_grad = torch.linspace(0.0, 1.0, top_range, device=image.device, dtype=image.dtype)
-            mask[:, :, :top_range, :] = top_grad.view(-1, 1)
-
-        if fade_bottom > 0:
-            bottom_range = int(h * fade_bottom)
-            bottom_grad = torch.linspace(1.0, 0.0, bottom_range, device=image.device, dtype=image.dtype)
-            mask[:, :, h - bottom_range:, :] = bottom_grad.view(-1, 1)
-
-        if fade_left > 0:
-            left_range = int(w * fade_left)
-            left_grad = torch.linspace(0.0, 1.0, left_range, device=image.device, dtype=image.dtype)
-            mask[:, :, :, :left_range] = left_grad.view(1, -1)
-
-        if fade_right > 0:
-            right_range = int(w * fade_right)
-            right_grad = torch.linspace(1.0, 0.0, right_range, device=image.device, dtype=image.dtype)
-            mask[:, :, :, w - right_range:] = right_grad.view(1, -1)
-
-        return mask
-
     def apply_pose_conditioning(
         self,
+        vae_name,
         model,
         conditioning,
-        vae,
         controlnet_name,
-        pose_image,
-        target_width=0,
-        target_height=0,
-        strength=None,
-        fade_top=0.0,
-        fade_bottom=0.0,
-        fade_left=0.0,
-        fade_right=0.0,
+        folder_name,
+        strength_openpose,
+        strength_openpose_hand,
+        strength_openpose_full,
+        strength_canny,
+        strength_depth,
+        strength_normal,
+        spatial_fade="none",
+        spatial_fade_strength=0.5,
+        debug=False,
     ):
-        """Apply pose conditioning using FLUX.2 Fun ControlNet mechanism.
+        """Apply multi-pose conditioning using FLUX.2 Fun ControlNet."""
+        if debug:
+            logger.info(f"[AdvancedOpenposeLoader] Starting pipeline:")
+            logger.info(f"  vae={vae_name}")
+            logger.info(f"  controlnet={controlnet_name}")
+            logger.info(f"  folder={folder_name}")
+            logger.info(f"  strengths: openpose={strength_openpose}, hand={strength_openpose_hand}, full={strength_openpose_full}, canny={strength_canny}, depth={strength_depth}, normal={strength_normal}")
+            logger.info(f"  spatial_fade={spatial_fade} (strength={spatial_fade_strength})")
+            logger.info(f"  debug={debug}")
 
-        Delegates to Flux2FunControlNetLoader and Flux2FunControlNetApply for
-        proper control signal generation and application.
+        # Step 1: Load VAE
+        device = comfy.model_management.get_torch_device()
+        vae_path = folder_paths.get_full_path("vae", vae_name)
+        if debug:
+            logger.info(f"[AdvancedOpenposeLoader] Loading VAE: {vae_path}")
+        if self.loaded_vae is None or self.loaded_vae._vae_file != vae_path:
+            self.loaded_vae = comfy.sd.VAE()
+            self.loaded_vae.load_vae(vae_path)
+        vae = self.loaded_vae.vae
 
-        Supports spatial fade masking for natural blending of pose conditioning.
-        """
-        import comfy.utils
-        import comfy.model_management
+        # Step 2: Resolve pose folder and list pose images
+        if debug:
+            logger.info(f"[AdvancedOpenposeLoader] Loading pose images from: {folder_name}")
+        pose_folder = resolve_pose_folder(folder_name)
+        pose_images = list_pose_images(pose_folder)
 
-        if strength is None:
-            strength = 0.8
+        # Step 3: Load and preprocess each pose image
+        processed_images = {}
+        for pose_type in POSE_TYPES:
+            if pose_type not in pose_images:
+                if debug:
+                    logger.info(f"[AdvancedOpenposeLoader] Missing pose image: {pose_type}")
+                continue
+            if debug:
+                logger.info(f"[AdvancedOpenposeLoader] Loading pose image: {pose_type}")
+            pose_image = load_pose_image(pose_images[pose_type])
+            pose_image = resize_to_1024(pose_image)
+            processed_images[pose_type] = pose_image
 
-        # Lazy import of Flux2Fun nodes at runtime (not module load time)
-        # so they work in the ComfyUI environment with all dependencies
-        flux2fun_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "comfyui-flux2fun-controlnet")
-        if not os.path.exists(flux2fun_path):
-            flux2fun_path = "/home/tuiteraz/behemoth-lan/comfyui/data/ComfyUI/custom_nodes/comfyui-flux2fun-controlnet"
+        # Step 4: Encode each pose image to control context
+        control_contexts = {}
+        strengths = {
+            "openpose": strength_openpose,
+            "openpose_hand": strength_openpose_hand,
+            "openpose_full": strength_openpose_full,
+            "canny": strength_canny,
+            "depth": strength_depth,
+            "normal": strength_normal,
+        }
 
-        sys.path.insert(0, flux2fun_path)
-        from nodes import Flux2FunControlNetLoader, Flux2FunControlNetApply
-
-        # Resize pose image to target dimensions if specified
-        resized_pose = pose_image
-        if target_width > 0 and target_height > 0:
-            resized_pose = comfy.utils.resize_image(pose_image, target_width, target_height, "lanczos")
-
-        # Apply spatial fade mask if any fade parameters are set
-        if fade_top > 0 or fade_bottom > 0 or fade_left > 0 or fade_right > 0:
-            fade_mask = self._generate_spatial_fade_mask(
-                resized_pose, fade_top, fade_bottom, fade_left, fade_right
+        for pose_type, pose_image in processed_images.items():
+            if debug:
+                logger.info(f"[AdvancedOpenposeLoader] Encoding pose: {pose_type}")
+            latent = encode_pose_image(vae, pose_image)
+            context = build_control_context(
+                latent,
+                fade_mode=spatial_fade,
+                fade_strength=spatial_fade_strength
             )
-            # Apply mask to pose image (broadcast mask over batch)
-            mask_expanded = fade_mask.expand_as(resized_pose)
-            faded_pose = resized_pose * mask_expanded
-            print(f"[AdvancedOpenposeLoader] Applied spatial fade mask (top={fade_top}, bottom={fade_bottom}, left={fade_left}, right={fade_right})")
-        else:
-            faded_pose = resized_pose
+            control_contexts[pose_type] = context
 
-        # Load controlnet using Flux2FunControlNetLoader
-        loader = Flux2FunControlNetLoader()
-        (controlnet,) = loader.load_controlnet(controlnet_name)
+        # Step 5: Load ControlNet models (one per pose type)
+        controlnet_models = []
+        for pose_type in POSE_TYPES:
+            if pose_type not in control_contexts:
+                continue
+            if debug:
+                logger.info(f"[AdvancedOpenposeLoader] Loading ControlNet for: {pose_type}")
+            cn_path = folder_paths.get_full_path("controlnet", controlnet_name)
+            controlnet = apply_controlnet_model(model, cn_path)
+            controlnet_models.append((pose_type, controlnet))
 
-        # Apply controlnet using Flux2FunControlNetApply
-        applier = Flux2FunControlNetApply()
-        (positive_cond,) = applier.apply_controlnet(
-            conditioning,
-            controlnet,
-            vae,
-            strength,
-            control_image=faded_pose,
-            mask=None,
-            inpaint_image=None
+        # Step 6: Build control chain with individual strengths
+        hints = [control_contexts[pose_type] for pose_type, _ in controlnet_models]
+        strengths_list = [strengths[pose_type] for pose_type, _ in controlnet_models]
+        model_list = [cn for _, cn in controlnet_models]
+
+        # Step 7: Chain controlnets and apply conditioning
+        if debug:
+            logger.info(f"[AdvancedOpenposeLoader] Chaining {len(controlnet_models)} controlnets")
+        wrappers = build_control_chain(model_list, hints, strengths_list)
+
+        # Step 8: Apply control via transformer patching
+        model_obj = model.model if hasattr(model, 'model') else model
+        if debug:
+            logger.info(f"[AdvancedOpenposeLoader] Patching transformer for control")
+        original_forward = patch_transformer_for_control(
+            model_obj,
+            model_list[0],
+            hints[0] if hints else None,
+            strengths_list[0] if strengths_list else 0.75
         )
+        self.active_patches.append((model_obj, original_forward))
 
-        # Negative conditioning without pose
+        # Return model (unchanged), positive conditioning, negative conditioning
+        positive_cond = conditioning
         negative_cond = conditioning
 
-        print(f"[AdvancedOpenposeLoader] Applied pose control (strength={strength}, controlnet={controlnet_name})")
+        if debug:
+            logger.info(f"[AdvancedOpenposeLoader] Pipeline complete")
 
-        # Return model (unchanged), positive conditioning with pose, negative conditioning
         return (model, positive_cond, negative_cond)
+
+    def cleanup(self):
+        """Clean up active patches and release resources."""
+        for model_obj, original_forward in self.active_patches:
+            unpatch_transformer(model_obj, original_forward)
+        self.active_patches = []
+        self.loaded_vae = None
+        self.loaded_controlnets = []

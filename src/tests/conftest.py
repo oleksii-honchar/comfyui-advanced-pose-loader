@@ -11,6 +11,7 @@ mock_comfy.sd = MagicMock()
 sys.modules['comfy'] = mock_comfy
 sys.modules['comfy.utils'] = mock_comfy.utils
 sys.modules['comfy.sd'] = mock_comfy.sd
+sys.modules['folder_paths'] = MagicMock()
 
 
 @pytest.fixture(autouse=True)
