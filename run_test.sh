@@ -28,7 +28,7 @@ pip install -r requirements.txt --quiet
 echo "✓ Dependencies installed"
 
 # Set up PYTHONPATH to include cloned deps
-export PYTHONPATH="${DEPS_DIR}/comfyui:${DEPS_DIR}/ComfyUI-Flux2Klein-Enhancer:${DEPS_DIR}/comfyui-flux2fun-controlnet:${DEPS_DIR}/ComfyUI-Multi-Folder-Loader:${SCRIPT_DIR}:${PYTHONPATH}"
+export PYTHONPATH="${DEPS_DIR}/comfyui:${DEPS_DIR}/ComfyUI-Flux2Klein-Enhancer:${DEPS_DIR}/comfyui-flux2fun-controlnet:${DEPS_DIR}/ComfyUI-Multi-Folder-Loader:${SCRIPT_DIR}"
 
 echo ""
 echo "=== Test 1: Import Advanced OpenPose Loader ==="
