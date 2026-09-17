@@ -123,7 +123,6 @@ class AdvancedOpenposeLoader:
         vae_model = vae
 
         # Build control contexts
-        control_contexts = {}
         strengths = {
             "openpose": openpose_strength,
             "openpose_hand": openpose_hand_strength,
@@ -133,54 +132,118 @@ class AdvancedOpenposeLoader:
             "normal": normal_strength,
         }
 
+        # Store pose types and their strengths in wrapper
+        wrapper = AdvancedOpenposeWrapper(
+            controlnet=controlnet,
+            strengths=strengths,
+            spatial_fade=spatial_fade,
+            spatial_fade_strength=spatial_fade_strength,
+        )
+
         for pose_type, pose_image in processed_images.items():
             if debug:
                 logger.info(f"[AdvancedOpenposeLoader] Encoding pose: {pose_type}")
             latent = encode_pose_image(vae_model, pose_image)
-            # Convert boolean spatial_fade to fade_mode string
             fade_mode = "top" if spatial_fade else "none"
             context = build_control_context(
                 latent,
                 fade_mode=fade_mode,
                 fade_strength=spatial_fade_strength
             )
-            control_contexts[pose_type] = context
+            wrapper.add_pose_type(pose_type, context)
 
-        # Step 5: Use provided ControlNet model (reused for all pose types)
-        if debug:
-            logger.info(f"[AdvancedOpenposeLoader] Using provided ControlNet")
-
-        # Step 6: Apply FLUX.2 Fun Control via transformer patching
-        self._register_control_contexts(controlnet, control_contexts, strengths)
+        # Step 5: Store wrapper in conditioning's control field
+        c = [[t[0], t[1].copy()] for t in conditioning]
+        for t in c:
+            existing_control = t[1].get('control', None)
+            if existing_control is not None:
+                wrapper.previous_controlnet = existing_control
+            t[1]['control'] = wrapper
+            t[1]['control_apply_to_uncond'] = True
 
         if debug:
             logger.info(f"[AdvancedOpenposeLoader] Pipeline complete")
 
-        return (model, conditioning, conditioning)
+        return (model, c, c)
 
-    def _register_control_contexts(self, controlnet, control_contexts, strengths):
-        """Register control contexts for this sampling run."""
-        from comfy.model_patcher import ModelPatcher
 
-        patch = {
-            "controlnet": controlnet,
-            "contexts": control_contexts,
-            "strengths": strengths,
-        }
-
-        def apply_patch(model, *args, **kwargs):
-            patch_transformer_for_control(
-                model, patch["controlnet"], None,
-                strength=patch["strengths"]["openpose"]
-            )
-            return model
-
-        def remove_patch(model, *args, **kwargs):
-            cleanup_control_patch()
-            return model
-
-        patch_id = "advanced_openpose_loader"
-        ModelPatcher.get_all_model_patches()[patch_id] = (apply_patch, remove_patch)
+class AdvancedOpenposeWrapper:
+    """Wrapper for advanced pose loader control contexts.
+    
+    Follows the same pattern as ControlNetWrapper in the deps reference implementation.
+    Supports multiple pose types with individual control contexts.
+    """
+    
+    def __init__(self, controlnet, strengths, spatial_fade=False, spatial_fade_strength=1.0):
+        self.controlnet = controlnet
+        self.strengths = strengths
+        self.spatial_fade = spatial_fade
+        self.spatial_fade_strength = spatial_fade_strength
+        self.poses = []  # List of (pose_type, context) tuples
+        self.previous_controlnet = None
+    
+    def add_pose_type(self, pose_type, context):
+        self.poses.append((pose_type, context))
+    
+    def pre_run(self, model, percent_to_timestep_function):
+        """Apply the Flux2Fun patch at sampling start."""
+        from src.flux2fun_integration import patch_transformer_for_control
+        patch_transformer_for_control(model, self.controlnet, None, strength=self.strengths.get("openpose", 0.75))
+        if self.previous_controlnet:
+            self.previous_controlnet.pre_run(model, percent_to_timestep_function)
+    
+    def get_control(self, x_noisy, t, cond, batched_number, transformer_options=None):
+        """Populate transformer_options with control context data."""
+        control_prev = None
+        if self.previous_controlnet:
+            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number, transformer_options)
+        
+        if transformer_options:
+            # Initialize lists if this is the first Flux2Fun controlnet in the chain
+            if 'flux2_fun_controlnets' not in transformer_options:
+                transformer_options['flux2_fun_controlnets'] = []
+                transformer_options['flux2_fun_control_contexts'] = []
+                transformer_options['flux2_fun_control_scales'] = []
+                transformer_options['flux2_fun_ctrl_dims'] = []
+            
+            # Add each pose type's context to the lists
+            for pose_type, context in self.poses:
+                strength = self.strengths.get(pose_type, 0.0)
+                if strength == 0.0:
+                    continue
+                # Estimate dimensions from context shape
+                if context is not None:
+                    b, c, h, w = context.shape
+                    transformer_options['flux2_fun_controlnets'].append(self.controlnet)
+                    transformer_options['flux2_fun_control_contexts'].append(context)
+                    transformer_options['flux2_fun_control_scales'].append(strength)
+                    transformer_options['flux2_fun_ctrl_dims'].append((h // 2, w // 2))
+        
+        output = {"input": [], "output": []}
+        if control_prev:
+            output["input"] = control_prev.get("input", [])
+            output["output"] = control_prev.get("output", [])
+        return output
+    
+    def cleanup(self):
+        """Remove the Flux2Fun patch at sampling end."""
+        from src.flux2fun_integration import cleanup_control_patch
+        cleanup_control_patch()
+        if self.previous_controlnet:
+            self.previous_controlnet.cleanup()
+    
+    def get_models(self):
+        return self.previous_controlnet.get_models() if self.previous_controlnet else []
+    
+    def get_extra_hooks(self):
+        return self.previous_controlnet.get_extra_hooks() if self.previous_controlnet else []
+    
+    def inference_memory_requirements(self, dtype):
+        import torch
+        mem = sum(p.numel() for p in self.controlnet.parameters()) * 2
+        if self.previous_controlnet:
+            mem += self.previous_controlnet.inference_memory_requirements(dtype)
+        return mem
 
 
 NODE_CLASS_MAPPINGS = {
