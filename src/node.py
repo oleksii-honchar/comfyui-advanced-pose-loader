@@ -146,9 +146,8 @@ class AdvancedOpenposeLoader:
         # Step 2: Load pose images
         available_images = list_pose_images(pose_folder)
         pose_images = {}
-        for pose_type in POSE_TYPES:
-            if pose_type in available_images:
-                pose_images[pose_type] = available_images[pose_type]
+        for pose_type, file_path in available_images.items():
+            pose_images[pose_type] = load_pose_image(file_path)
 
         if not pose_images:
             raise ValueError(f"No pose images found in {pose_folder}")
