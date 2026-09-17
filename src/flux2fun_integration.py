@@ -463,29 +463,29 @@ def _find_hw(seq_len):
 
 
 def patch_transformer_for_control(model, controlnet, hint, strength=0.75):
-    """Monkey-patch the transformer's forward to inject control hints.
+    """Apply ControlNet via Flux class-level forward_orig patching.
+
+    This uses the same approach as comfyui-flux2fun-controlnet: patch the
+    Flux class's forward_orig method globally.
 
     Args:
-        model: The Flux model object with forward_orig method
+        model: The ComfyUI Flux model object (not used, kept for API compat)
         controlnet: Loaded Flux2FunControlNet instance
         hint: Control hint tensor [B, seq, channels]
         strength: Control strength (0.0-2.0)
 
     Returns:
-        The original forward function (for cleanup)
+        None (patch is applied at class level)
     """
     global _original_forward_orig, _patched
 
-    original_forward = model.forward_orig
-
-    def patched_fn(img, txt, **kwargs):
-        """Wrapper that injects control hint at the correct location."""
-        # Store the hint in kwargs for the main patched forward to use
-        return _original_forward_orig(model, img, txt, **kwargs)
-
-    # Apply the patch
-    model.forward_orig = _patched_forward_orig
-    return original_forward
+    if not _patched:
+        from comfy.model_base import Flux
+        _original_forward_orig = Flux.forward_orig
+        Flux.forward_orig = _patched_forward_orig
+        _patched = True
+        print("[Flux2 Fun] ControlNet patch applied (scoped to this sampling run)")
+    return None
 
 
 def unpatch_transformer(model, original_forward):
@@ -493,12 +493,16 @@ def unpatch_transformer(model, original_forward):
 
     Args:
         model: The Flux model object
-        original_forward: The original forward function to restore
+        original_forward: The original forward function to restore (unused)
     """
     global _original_forward_orig, _patched
 
-    model.forward_orig = original_forward
-    print("[Flux2 Fun] ControlNet patch removed")
+    if _patched:
+        from comfy.model_base import Flux
+        Flux.forward_orig = _original_forward_orig
+        _original_forward_orig = None
+        _patched = False
+        print("[Flux2 Fun] ControlNet patch removed")
 
 
 def build_control_chain(controlnets, hints, strengths):
