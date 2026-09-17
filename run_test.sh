@@ -53,7 +53,12 @@ source "${VENV_DIR}/bin/activate"
 echo ""
 echo "Installing Python dependencies..."
 pip install -r requirements.txt --quiet
-echo "✓ Dependencies installed"
+echo "✓ Advanced OpenPose Loader dependencies installed"
+
+echo ""
+echo "Installing ComfyUI dependencies..."
+pip install -r "${DEPS_DIR}/comfyui/requirements.txt" --quiet
+echo "✓ ComfyUI dependencies installed"
 
 # Set up PYTHONPATH to include cloned deps
 export PYTHONPATH="${DEPS_DIR}/comfyui:${DEPS_DIR}/ComfyUI-Flux2Klein-Enhancer:${DEPS_DIR}/comfyui-flux2fun-controlnet:${DEPS_DIR}/ComfyUI-Multi-Folder-Loader:${SCRIPT_DIR}"
