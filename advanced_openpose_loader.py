@@ -1,42 +1,24 @@
 """
-AdvancedOpenposeLoader - Enhanced pose-guided image generation with ControlNet
+AdvancedOpenposeLoader - FLUX.2 Fun ControlNet Pose Conditioning
 
-This module loads ControlNet models and pose images, applies pose guidance to
-the generation process, and optionally applies spatial fade masks for localized
-pose influence.
+Loads pose images, generates ControlNet conditioning for FLUX.2 diffusion models.
+Uses the same architecture and control flow as the working Flux2FunControlNetApply
+node from comfyui-flux2fun-controlnet.
 
-Features:
-- Automatic pose image encoding via the loaded VAE
-- Support for multiple pose formats (PNG, JPG)
-- Strength control (global + per-channel)
-- Optional spatial fade masks for localized pose influence
-- Multiple ControlNet models chained together
+This is the main entry point for the ComfyUI custom node.
 """
-
-from __future__ import annotations
-
-import os
 import sys
-import hashlib
-import numpy as np
-from pathlib import Path
+import os
 
-# Add node root to path so src imports work regardless of cwd
-NODE_ROOT = os.path.abspath(os.path.dirname(__file__))
-if NODE_ROOT not in sys.path:
-    sys.path.insert(0, NODE_ROOT)
+# Add parent directory to path to import from src/
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-# Now import src modules
-from src.node import AdvancedOpenposeLoader, CONTROLNET_NODE_CLASS_NAME, POSE_LOADER_NODE_CLASS_NAME
-
-__version__ = "2.0.0"
+from src.node import AdvancedOpenposeLoader
 
 NODE_CLASS_MAPPINGS = {
-    CONTROLNET_NODE_CLASS_NAME: AdvancedOpenposeLoader,
-    POSE_LOADER_NODE_CLASS_NAME: AdvancedOpenposeLoader,
+    "AdvancedOpenposeLoader": AdvancedOpenposeLoader
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    CONTROLNET_NODE_CLASS_NAME: "Advanced OpenPose ControlNet",
-    POSE_LOADER_NODE_CLASS_NAME: "Advanced Pose Image Loader",
+    "AdvancedOpenposeLoader": "Advanced OpenPose Loader"
 }
