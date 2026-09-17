@@ -157,7 +157,7 @@ class AdvancedOpenposeLoader:
 
     def apply_pose_conditioning(
         self,
-        vae_name,
+        vae,
         model,
         conditioning,
         control_net,
@@ -175,7 +175,7 @@ class AdvancedOpenposeLoader:
         """Apply multi-pose conditioning using FLUX.2 Fun ControlNet."""
         if debug:
             logger.info(f"[AdvancedOpenposeLoader] Starting pipeline:")
-            logger.info(f"  vae={vae_name}")
+            logger.info(f"  vae={vae}")
             logger.info(f"  controlnet={control_net}")
             logger.info(f"  folder={folder_name}")
             logger.info(f"  strengths: openpose={strength_openpose}, hand={strength_openpose_hand}, full={strength_openpose_full}, canny={strength_canny}, depth={strength_depth}, normal={strength_normal}")
@@ -184,7 +184,7 @@ class AdvancedOpenposeLoader:
 
         # Step 1: Load VAE
         device = comfy.model_management.get_torch_device()
-        vae_path = folder_paths.get_full_path("vae", vae_name)
+        vae_path = folder_paths.get_full_path("vae", vae)
         if debug:
             logger.info(f"[AdvancedOpenposeLoader] Loading VAE: {vae_path}")
         if self.loaded_vae is None or self.loaded_vae._vae_file != vae_path:

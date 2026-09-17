@@ -169,7 +169,7 @@ def test_function_executes_complete_pipeline():
         conditioning = [("cond_tensor", {"params": {}})]
 
         result = node.apply_pose_conditioning(
-            vae_name="flux2-vae.safetensors",
+            vae="flux2-vae.safetensors",
             model=model,
             conditioning=conditioning,
             control_net="test-controlnet.safetensors",
