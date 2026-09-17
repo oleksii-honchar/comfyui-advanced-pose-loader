@@ -83,17 +83,24 @@ class AdvancedOpenposeLoader:
             "required": {
                 "model": ("MODEL", {}),
                 "conditioning": ("CONDITIONING", {}),
-                "vae": ("STRING", {
-                    "default": "flux2-vae.safetensors",
+                "vae": ("COMBO", {
+                    "values": vae_options,
+                    "default": vae_default,
                 }),
-                "control_net": ("STRING", {
-                    "default": "FLUX.2-dev-Fun-Controlnet-Union-2602-fp8.safetensors",
+                "control_net": ("COMBO", {
+                    "values": cn_options,
+                    "default": cn_default,
                 }),
-                "pose_folder_name": ("STRING", {
-                    "default": "",
+                "pose_folder_name": ("COMBO", {
+                    "values": folder_options,
+                    "default": folder_default,
                 }),
             },
             "optional": {
+                "pose_types": ("STRING", {
+                    "default": "openpose,openpose_hand,openpose_full",
+                    "multiline": False,
+                }),
                 "openpose_strength": ("FLOAT", {
                     "default": 0.75, "min": 0.0, "max": 2.0, "step": 0.01
                 }),
@@ -130,7 +137,7 @@ class AdvancedOpenposeLoader:
     CATEGORY = "AdvancedPoseLoader"
 
     def execute(self, model, conditioning, pose_folder_name, vae, control_net,
-                openpose_strength=0.75, openpose_hand_strength=0.80,
+                pose_types=None, openpose_strength=0.75, openpose_hand_strength=0.80,
                 openpose_full_strength=0.85, canny_strength=0.0, depth_strength=0.0,
                 normal_strength=0.0, spatial_fade=False, spatial_fade_strength=1.0,
                 debug=False):
