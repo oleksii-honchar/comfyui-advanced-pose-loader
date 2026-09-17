@@ -32,73 +32,17 @@ DEFAULT_STRENGTHS = {
 }
 
 
-def get_vae_options():
-    """Auto-discover available VAE models."""
-    try:
-        options = list(folder_paths.get_filename_list("vae"))
-        logger.debug(f"VAE options from get_filename_list: {options}")
-    except Exception as e:
-        logger.debug(f"VAE get_filename_list exception: {e}")
-        options = []
-    if not options:
-        logger.warning("No VAE options found, using default")
-    if "flux2-vae.safetensors" not in options:
-        options.append("flux2-vae.safetensors")
-    return options, "flux2-vae.safetensors"
-
-
-def get_controlnet_options():
-    """Auto-discover available ControlNet models."""
-    try:
-        options = list(folder_paths.get_filename_list("controlnet"))
-        logger.debug(f"ControlNet options from get_filename_list: {options}")
-    except Exception as e:
-        logger.debug(f"ControlNet get_filename_list exception: {e}")
-        options = []
-    if not options:
-        logger.warning("No ControlNet options found, using default")
-    target = "FLUX.2-dev-Fun-Controlnet-Union-2602-fp8.safetensors"
-    if target not in options:
-        options.append(target)
-    return options, target
-
-
-def get_pose_folder_options():
-    """Auto-discover available pose folders."""
-    try:
-        base = "/opt/comfyui/poses"
-        if not os.path.exists(base):
-            return [], ""
-        folders = [f for f in os.listdir(base)
-                   if os.path.isdir(os.path.join(base, f))
-                   and not f.startswith(".")
-                   and not f.startswith("_")]
-    except Exception:
-        folders = []
-    return folders, folders[0] if folders else ""
-
-
 class AdvancedOpenposeLoader:
     """Advanced pose loader with FLUX.2 Fun Control integration."""
 
     @classmethod
     def INPUT_TYPES(cls):
-        vae_options, vae_default = get_vae_options()
-        cn_options, cn_default = get_controlnet_options()
-        folder_options, folder_default = get_pose_folder_options()
-
         return {
             "required": {
                 "model": ("MODEL", {}),
                 "conditioning": ("CONDITIONING", {}),
-                "vae": ("COMBO", {
-                    "values": vae_options,
-                    "default": vae_default,
-                }),
-                "control_net": ("COMBO", {
-                    "values": cn_options,
-                    "default": cn_default,
-                }),
+                "vae": ("VAE", {}),
+                "control_net": ("CONTROL_NET", {}),
                 "pose_folder_name": ("STRING", {
                     "default": "",
                 }),
@@ -173,10 +117,10 @@ class AdvancedOpenposeLoader:
                 logger.info(f"[AdvancedOpenposeLoader] Resizing {pose_type} to 1024x1024")
             processed_images[pose_type] = resize_to_1024(image)
 
-        # Step 4: Load VAE and encode
+        # Step 4: Use provided VAE and encode
         if debug:
-            logger.info(f"[AdvancedOpenposeLoader] Loading VAE: {vae}")
-        vae_model = self._load_vae(vae)
+            logger.info(f"[AdvancedOpenposeLoader] Encoding with provided VAE")
+        vae_model = vae
 
         # Build control contexts
         control_contexts = {}
@@ -200,11 +144,10 @@ class AdvancedOpenposeLoader:
             )
             control_contexts[pose_type] = context
 
-        # Step 5: Load ControlNet model once (reused for all pose types)
+        # Step 5: Use provided ControlNet model (reused for all pose types)
         if debug:
-            logger.info(f"[AdvancedOpenposeLoader] Loading ControlNet: {control_net}")
-        cn_path = folder_paths.get_full_path("controlnet", control_net)
-        controlnet = self._load_controlnet(cn_path)
+            logger.info(f"[AdvancedOpenposeLoader] Using provided ControlNet")
+        controlnet = control_net
 
         # Step 6: Apply FLUX.2 Fun Control via transformer patching
         self._register_control_contexts(controlnet, control_contexts, strengths)
@@ -213,51 +156,6 @@ class AdvancedOpenposeLoader:
             logger.info(f"[AdvancedOpenposeLoader] Pipeline complete")
 
         return (model, conditioning, conditioning)
-
-    def _load_vae(self, vae_name):
-        """Load VAE model."""
-        vae_path = folder_paths.get_full_path("vae", vae_name)
-        if not os.path.exists(vae_path):
-            raise FileNotFoundError(f"VAE not found: {vae_path}")
-        try:
-            from comfy.model_management import load_model
-            return load_model(vae_path)
-        except Exception:
-            from comfy.vae import load_vae
-            return load_vae(vae_path)
-
-    def _load_controlnet(self, cn_path):
-        """Load FLUX.2 Fun ControlNet model."""
-        import json
-        from diffusers import Flux2FunControlNet
-
-        if not os.path.exists(cn_path):
-            raise FileNotFoundError(f"ControlNet not found: {cn_path}")
-
-        logger.info(f"[AdvancedOpenposeLoader] Loading FLUX.2 Fun ControlNet: {cn_path}")
-
-        config_path = os.path.join(os.path.dirname(cn_path), "config.json")
-        if os.path.exists(config_path):
-            with open(config_path) as f:
-                config = json.load(f)
-            controlnet = Flux2FunControlNet(**config)
-        else:
-            controlnet = Flux2FunControlNet()
-
-        state_dict = torch.load(cn_path, map_location="cpu", weights_only=True)
-        if "state_dict" in state_dict:
-            state_dict = state_dict["state_dict"]
-        if "diffusion_pytorch_model" in state_dict:
-            state_dict = state_dict["diffusion_pytorch_model"]
-
-        missing, unexpected = controlnet.load_state_dict(state_dict, strict=False)
-        if missing:
-            logger.warning(f"[AdvancedOpenposeLoader] Missing keys: {len(missing)}")
-        if unexpected:
-            logger.warning(f"[AdvancedOpenposeLoader] Unexpected keys: {len(unexpected)}")
-
-        controlnet.eval()
-        return controlnet
 
     def _register_control_contexts(self, controlnet, control_contexts, strengths):
         """Register control contexts for this sampling run."""
