@@ -217,10 +217,12 @@ class ControlNetWrapper:
     in transformer_options, which are processed by the patch.
     """
     
-    def __init__(self, controlnet, control_context, strength, low_vram=False):
+    def __init__(self, controlnet, control_context, strength, ctrl_h, ctrl_w, low_vram=False):
         self.controlnet = controlnet
         self.control_context = control_context
         self.strength = strength
+        self.ctrl_h = ctrl_h
+        self.ctrl_w = ctrl_w
         self.low_vram = low_vram
         self.previous_controlnet = None
     
@@ -243,11 +245,13 @@ class ControlNetWrapper:
                 transformer_options['flux2_fun_controlnets'] = []
                 transformer_options['flux2_fun_control_contexts'] = []
                 transformer_options['flux2_fun_control_scales'] = []
+                transformer_options['flux2_fun_ctrl_dims'] = []
                 transformer_options['flux2_fun_low_vram'] = self.low_vram
             
             transformer_options['flux2_fun_controlnets'].append(self.controlnet)
             transformer_options['flux2_fun_control_contexts'].append(self.control_context)
             transformer_options['flux2_fun_control_scales'].append(self.strength)
+            transformer_options['flux2_fun_ctrl_dims'].append((self.ctrl_h, self.ctrl_w))
         
         output = {"input": [], "output": []}
         if control_prev:
@@ -257,7 +261,7 @@ class ControlNetWrapper:
     
     def copy(self):
         """Create a copy of the wrapper."""
-        c = ControlNetWrapper(self.controlnet, self.control_context, self.strength, self.low_vram)
+        c = ControlNetWrapper(self.controlnet, self.control_context, self.strength, self.ctrl_h, self.ctrl_w, self.low_vram)
         c.previous_controlnet = self.previous_controlnet
         return c
     
