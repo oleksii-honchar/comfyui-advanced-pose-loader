@@ -107,15 +107,13 @@ class AdvancedOpenposeLoader:
             logger.info(f"[AdvancedOpenposeLoader] Pose folder: {pose_folder}")
 
         # Step 2: Load pose images
+        available_images = list_pose_images(pose_folder)
         pose_images = {}
         for pose_type in POSE_TYPES:
-            if pose_type not in pose_folder:
-                continue
             if pose_types and pose_type not in pose_types.split(","):
                 continue
-            images = list_pose_images(pose_folder, pose_type)
-            if images:
-                pose_images[pose_type] = images[0]
+            if pose_type in available_images:
+                pose_images[pose_type] = available_images[pose_type]
 
         if not pose_images:
             raise ValueError(f"No pose images found in {pose_folder}")
