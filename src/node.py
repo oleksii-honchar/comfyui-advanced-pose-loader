@@ -191,7 +191,11 @@ class AdvancedOpenposeLoader:
             vae_state_dict = comfy.utils.load_torch_file(vae_path)
             self.loaded_vae = comfy.sd.VAE(sd=vae_state_dict)
             self.loaded_vae._vae_file = vae_path
-        vae = self.loaded_vae.vae
+                # Handle both old (wrapped) and new (direct) ComfyUI VAE object structures
+        if hasattr(self.loaded_vae, 'vae'):
+            vae = self.loaded_vae.vae
+        else:
+            vae = self.loaded_vae
 
         # Step 2: Resolve pose folder and list pose images
         if debug:
