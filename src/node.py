@@ -91,9 +91,8 @@ class AdvancedOpenposeLoader:
                     "values": cn_options,
                     "default": cn_default,
                 }),
-                "pose_folder_name": ("COMBO", {
-                    "values": folder_options,
-                    "default": folder_default,
+                "pose_folder_name": ("STRING", {
+                    "default": "",
                 }),
             },
             "optional": {
