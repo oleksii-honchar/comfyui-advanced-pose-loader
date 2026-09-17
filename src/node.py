@@ -182,6 +182,14 @@ class AdvancedOpenposeWrapper:
         self.poses = []  # List of (pose_type, context) tuples
         self.previous_controlnet = None
     
+    def get_extra_hooks(self):
+        """Return extra hooks for the controlnet.
+        
+        Flux2Fun uses forward method patching instead of hooks, so return None.
+        This method is required by ComfyUI's get_hooks_from_cond.
+        """
+        return None
+    
     def add_pose_type(self, pose_type, context):
         self.poses.append((pose_type, context))
     
