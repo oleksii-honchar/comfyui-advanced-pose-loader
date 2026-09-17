@@ -18,6 +18,8 @@ import sys
 import logging
 import torch
 import comfy.utils
+from PIL import Image
+import numpy as np
 import folder_paths
 
 logger = logging.getLogger(__name__)
@@ -132,8 +134,10 @@ def load_pose_image(file_path):
         Tensor representing the pose image in [0, 1] range
     """
     try:
-        # Use comfy's image loading utilities
-        pose_tensor = comfy.utils.load_image(file_path, "RGB")
+        # Use Pillow directly (comfy.utils.load_image removed in newer ComfyUI)
+        img = Image.open(file_path)
+        img = img.convert("RGB")
+        pose_tensor = torch.from_numpy(np.array(img, dtype=np.float32))
         # Convert to [0, 1] range tensor
         if pose_tensor.max() > 1.0:
             pose_tensor = pose_tensor / 255.0

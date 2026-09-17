@@ -147,35 +147,45 @@ class TestLoadPoseImage:
 
     def test_load_image_returns_tensor(self):
         """load_pose_image returns a tensor."""
-        with patch('src.pose_loader.comfy.utils') as mock_utils:
-            mock_tensor = MagicMock()
-            mock_tensor.max.return_value = 255.0
-            mock_utils.load_image.return_value = mock_tensor
+        import numpy as np
+        from PIL import Image
+        with patch('src.pose_loader.Image.open') as mock_open:
+            mock_img = MagicMock()
+            mock_img.convert.return_value = mock_img
+            mock_img.__array__ = MagicMock(return_value=np.zeros((100, 100, 3), dtype=np.uint8))
+            mock_open.return_value = mock_img
 
             result = load_pose_image('/path/to/pose.png')
             assert result is not None
-            mock_utils.load_image.assert_called_once_with('/path/to/pose.png', 'RGB')
+            mock_open.assert_called_once_with('/path/to/pose.png')
 
     def test_normalizes_uint8_to_float(self):
         """Images with max > 1.0 are normalized to [0, 1]."""
-        with patch('src.pose_loader.comfy.utils') as mock_utils:
-            mock_tensor = MagicMock()
-            mock_tensor.max.return_value = 255.0
-            mock_utils.load_image.return_value = mock_tensor
+        import numpy as np
+        from PIL import Image
+        with patch('src.pose_loader.Image.open') as mock_open:
+            mock_img = MagicMock()
+            mock_img.convert.return_value = mock_img
+            mock_img.__array__ = MagicMock(return_value=np.full((100, 100, 3), 255, dtype=np.uint8))
+            mock_open.return_value = mock_img
 
-            load_pose_image('/path/to/pose.png')
-            # Division should be called on the tensor
-            mock_tensor.__truediv__.assert_called_once_with(255.0)
+            result = load_pose_image('/path/to/pose.png')
+            # Should be normalized to [0, 1]
+            assert result.max() <= 1.0
 
     def test_already_float_not_normalized(self):
         """Images already in [0, 1] range are not normalized."""
-        with patch('src.pose_loader.comfy.utils') as mock_utils:
-            mock_tensor = MagicMock()
-            mock_tensor.max.return_value = 0.8
-            mock_utils.load_image.return_value = mock_tensor
+        import numpy as np
+        from PIL import Image
+        with patch('src.pose_loader.Image.open') as mock_open:
+            mock_img = MagicMock()
+            mock_img.convert.return_value = mock_img
+            mock_img.__array__ = MagicMock(return_value=np.full((100, 100, 3), 0.8, dtype=np.float32))
+            mock_open.return_value = mock_img
 
-            load_pose_image('/path/to/pose.png')
-            mock_tensor.__truediv__.assert_not_called()
+            result = load_pose_image('/path/to/pose.png')
+            # Should not be normalized (already < 1.0)
+            assert result.max() == 0.8
 
     def test_error_on_missing_file(self):
         """Missing file raises ValueError."""
