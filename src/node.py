@@ -41,15 +41,15 @@ class AdvancedOpenposeLoader:
             "required": {
                 "model": ("MODEL", {}),
                 "conditioning": ("CONDITIONING", {}),
-                "pose_folder_name": ("STRING", {
-                    "default": "test",
-                    "multiline": False,
-                }),
                 "vae_name": ("STRING", {
                     "default": "flux2-vae.safetensors",
                 }),
                 "control_net_name": ("STRING", {
                     "default": "FLUX.2-dev-Fun-Controlnet-Union-2602-fp8.safetensors",
+                }),
+                "pose_folder_name": ("STRING", {
+                    "default": "test",
+                    "multiline": False,
                 }),
             },
             "optional": {
@@ -88,6 +88,7 @@ class AdvancedOpenposeLoader:
         }
 
     RETURN_TYPES = ("MODEL", "CONDITIONING", "CONDITIONING")
+    RETURN_NAMES = ("model", "positive", "negative")
     FUNCTION = "execute"
     CATEGORY = "AdvancedPoseLoader"
 
