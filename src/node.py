@@ -83,7 +83,7 @@ class AdvancedOpenposeLoader:
     FUNCTION = "execute"
     CATEGORY = "AdvancedPoseLoader"
 
-    def execute(self, model, conditioning, pose_folder_name, vae, control_net,
+    def execute(self, model, conditioning, pose_folder_name, vae, controlnet,
                 openpose_strength=0.75, openpose_hand_strength=0.80,
                 openpose_full_strength=0.85, canny_strength=0.0, depth_strength=0.0,
                 normal_strength=0.0, spatial_fade=False, spatial_fade_strength=1.0,
@@ -147,7 +147,6 @@ class AdvancedOpenposeLoader:
         # Step 5: Use provided ControlNet model (reused for all pose types)
         if debug:
             logger.info(f"[AdvancedOpenposeLoader] Using provided ControlNet")
-        controlnet = control_net
 
         # Step 6: Apply FLUX.2 Fun Control via transformer patching
         self._register_control_contexts(controlnet, control_contexts, strengths)
