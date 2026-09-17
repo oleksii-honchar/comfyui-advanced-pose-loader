@@ -9,6 +9,7 @@ Testable behaviors:
 5. Inpaint channels (20-35) are zeros
 6. encode_all_poses handles multiple pose types
 7. Error handling for missing pose types
+8. resize_to_1024 preserves aspect ratio with padding
 """
 import sys
 import os
@@ -36,7 +37,7 @@ sys.modules['comfy.utils'] = mock_comfy.utils
 sys.modules['folder_paths'] = MagicMock()
 
 from src.multi_pose_encoder import encode_pose_image, build_control_context, encode_all_poses
-from src.pose_preprocessor import generate_spatial_fade_mask
+from src.pose_preprocessor import generate_spatial_fade_mask, resize_to_1024
 
 
 class TestEncodePoseImage:
@@ -189,6 +190,71 @@ class TestEncodeAllPoses:
         # Should only process the provided type
         assert len(result) == 1, f"Expected 1 context for provided type, got {len(result)}"
         assert result[0][0] == "openpose"
+
+
+class TestResizeTo1024:
+    """Test resize with aspect ratio preservation and padding."""
+
+    def test_wide_image_padded_top_bottom(self):
+        """Wide image (200x500) should scale to fit 1024 width, pad top/bottom."""
+        img = torch.zeros((1, 200, 500, 3))
+        # Red square in center
+        img[:, 90:110, 240:260, 0] = 1.0
+
+        resized = resize_to_1024(img)
+
+        assert resized.shape == (1, 1024, 1024, 3), f"Wrong shape: {resized.shape}"
+
+        # Scale factor = 1024/500 = 2.048
+        # New height = 200 * 2.048 = 409 (int)
+        # Padding top/bottom = (1024 - 409) // 2 = 307
+        expected_scaled_h = int(200 * (1024 / 500))
+        pad_top = (1024 - expected_scaled_h) // 2
+
+        # Red square original: y[90:110], x[240:260]
+        # After scale: y[90*2.048:110*2.048] = [184:225], x[240*2.048:260*2.048] = [491:532]
+        # After padding: y[184+307:225+307] = [491:532]
+        red_region = resized[0, 491:532, 491:532, 0]
+        assert red_region.mean() > 0.5, f"Red square not at expected location: {red_region.mean()}"
+
+        # Verify padding is black (0.0)
+        top_pad = resized[0, 0:10, :, :]
+        bottom_pad = resized[0, 1014:1024, :, :]
+        assert top_pad.mean() < 0.1, f"Top padding not black: {top_pad.mean()}"
+        assert bottom_pad.mean() < 0.1, f"Bottom padding not black: {bottom_pad.mean()}"
+
+    def test_tall_image_padded_left_right(self):
+        """Tall image (500x200) should scale to fit 1024 height, pad left/right."""
+        img = torch.zeros((1, 500, 200, 3))
+        img[:, 240:260, 90:110, 0] = 1.0
+
+        resized = resize_to_1024(img)
+
+        assert resized.shape == (1, 1024, 1024, 3)
+
+        # Scale factor = 1024/500 = 2.048
+        # New width = 200 * 2.048 = 409 (int)
+        # Padding left/right = (1024 - 409) // 2 = 307
+        expected_scaled_w = int(200 * (1024 / 500))
+        pad_left = (1024 - expected_scaled_w) // 2
+
+        # Red square original: y[240:260], x[90:110]
+        # After scale: y[491:532], x[184:225]
+        # After padding: y[491:532], x[184+307:225+307] = [491:532]
+        red_region = resized[0, 491:532, 491:532, 0]
+        assert red_region.mean() > 0.5
+
+        # Verify left/right padding
+        left_pad = resized[0, :, 0:10, :]
+        right_pad = resized[0, :, 1014:1024, :]
+        assert left_pad.mean() < 0.1
+        assert right_pad.mean() < 0.1
+
+    def test_already_1024_no_resize(self):
+        """Image already 1024x1024 should be returned unchanged."""
+        img = torch.ones((1, 1024, 1024, 3))
+        resized = resize_to_1024(img)
+        assert torch.allclose(img, resized), "Already-1024 image was modified"
 
 
 if __name__ == '__main__':

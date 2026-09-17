@@ -10,7 +10,10 @@ import torch.nn.functional as F
 
 
 def resize_to_1024(image_tensor):
-    """Resize image tensor to exactly 1024x1024.
+    """Resize image tensor to exactly 1024x1024 with padding.
+
+    Maintains aspect ratio by scaling to fit within 1024x1024, then padding
+    with black (0.0) to fill the remaining space. Centered.
 
     Uses bilinear interpolation. Handles batched images.
     Input shape: (batch, height, width, channels)
@@ -22,10 +25,33 @@ def resize_to_1024(image_tensor):
     # ComfyUI convention is BHWC; F.interpolate expects BCTHW
     b, h, w, c = image_tensor.shape
     image = image_tensor.permute(0, 3, 1, 2)
+
+    # Calculate scale to fit within 1024x1024 while maintaining aspect ratio
+    target_size = 1024
+    scale = min(target_size / h, target_size / w)
+    new_h = int(h * scale)
+    new_w = int(w * scale)
+
+    # Scale image
     resized = F.interpolate(
-        image, size=(1024, 1024), mode="bilinear", align_corners=False
+        image, size=(new_h, new_w), mode="bilinear", align_corners=False
     )
-    return resized.permute(0, 2, 3, 1).to(image_tensor.dtype)
+
+    # Create padded canvas
+    padded = torch.zeros(
+        (b, c, target_size, target_size),
+        device=image.device,
+        dtype=image.dtype
+    )
+
+    # Calculate padding to center image
+    pad_top = (target_size - new_h) // 2
+    pad_left = (target_size - new_w) // 2
+
+    # Paste scaled image onto canvas
+    padded[:, :, pad_top:pad_top + new_h, pad_left:pad_left + new_w] = resized
+
+    return padded.permute(0, 2, 3, 1).to(image_tensor.dtype)
 
 
 def generate_spatial_fade_mask(height, width, fade_mode="none", fade_strength=0.5):
