@@ -238,15 +238,19 @@ class AdvancedOpenposeLoader:
             )
             control_contexts[pose_type] = context
 
-        # Step 5: Load ControlNet models (one per pose type)
+        # Step 5: Load ControlNet model once (reused for all pose types)
+        if debug:
+            logger.info(f"[AdvancedOpenposeLoader] Loading ControlNet model")
+        cn_path = folder_paths.get_full_path("controlnet", control_net)
+        controlnet = apply_controlnet_model(model, cn_path)
+
+        # Create references for each pose type (same model, different hints)
         controlnet_models = []
         for pose_type in POSE_TYPES:
             if pose_type not in control_contexts:
                 continue
             if debug:
                 logger.info(f"[AdvancedOpenposeLoader] Applying ControlNet for: {pose_type}")
-            cn_path = folder_paths.get_full_path("controlnet", control_net)
-            controlnet = apply_controlnet_model(model, cn_path)
             controlnet_models.append((pose_type, controlnet))
 
         # Step 6: Build control chain with individual strengths
@@ -287,3 +291,10 @@ class AdvancedOpenposeLoader:
         self.active_patches = []
         self.loaded_vae = None
         self.loaded_controlnets = []
+
+    def __del__(self):
+        """Automatic cleanup when object is garbage collected."""
+        try:
+            self.cleanup()
+        except Exception:
+            pass
