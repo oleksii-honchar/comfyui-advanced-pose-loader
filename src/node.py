@@ -92,7 +92,7 @@ class AdvancedOpenposeLoader:
                     "default": cn_default,
                 }),
                 "pose_folder_name": ("STRING", {
-                    "default": "1_sitting-on-desk_1",
+                    "default": "",
                 }),
             },
             "optional": {
