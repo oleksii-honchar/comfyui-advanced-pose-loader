@@ -61,7 +61,7 @@ try:
     assert "model" in input_types["required"], "Missing 'model' input"
     assert "conditioning" in input_types["required"], "Missing 'conditioning' input"
     assert "vae" in input_types["required"], "Missing 'vae' input"
-    assert "controlnet" in input_types["required"], "Missing 'controlnet' input"
+    assert "control_net" in input_types["required"], "Missing 'control_net' input"
     assert "folder_name" in input_types["required"], "Missing 'folder_name' input"
     print(f"  ✓ INPUT_TYPES valid with {len(input_types['required'])} required, {len(input_types['optional'])} optional inputs")
 except (AttributeError, AssertionError) as e:

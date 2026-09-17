@@ -111,7 +111,7 @@ class AdvancedOpenposeLoader:
                 "vae": ("COMBO", {"options": vae_options, "default": vae_default}),
                 "model": ("MODEL",),
                 "conditioning": ("CONDITIONING",),
-                "controlnet": ("COMBO", {"options": cn_options, "default": cn_default}),
+                "control_net": ("COMBO", {"options": cn_options, "default": cn_default}),
                 "folder_name": ("STRING", {"default": ""}),
                 "strength_openpose": ("FLOAT", {
                     "default": DEFAULT_STRENGTHS["openpose"],
@@ -160,7 +160,7 @@ class AdvancedOpenposeLoader:
         vae_name,
         model,
         conditioning,
-        controlnet_name,
+        control_net,
         folder_name,
         strength_openpose,
         strength_openpose_hand,
@@ -176,7 +176,7 @@ class AdvancedOpenposeLoader:
         if debug:
             logger.info(f"[AdvancedOpenposeLoader] Starting pipeline:")
             logger.info(f"  vae={vae_name}")
-            logger.info(f"  controlnet={controlnet_name}")
+            logger.info(f"  controlnet={control_net}")
             logger.info(f"  folder={folder_name}")
             logger.info(f"  strengths: openpose={strength_openpose}, hand={strength_openpose_hand}, full={strength_openpose_full}, canny={strength_canny}, depth={strength_depth}, normal={strength_normal}")
             logger.info(f"  spatial_fade={spatial_fade} (strength={spatial_fade_strength})")
@@ -239,8 +239,8 @@ class AdvancedOpenposeLoader:
             if pose_type not in control_contexts:
                 continue
             if debug:
-                logger.info(f"[AdvancedOpenposeLoader] Loading ControlNet for: {pose_type}")
-            cn_path = folder_paths.get_full_path("controlnet", controlnet_name)
+                logger.info(f"[AdvancedOpenposeLoader] Applying ControlNet for: {pose_type}")
+            cn_path = folder_paths.get_full_path("controlnet", control_net)
             controlnet = apply_controlnet_model(model, cn_path)
             controlnet_models.append((pose_type, controlnet))
 

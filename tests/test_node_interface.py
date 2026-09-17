@@ -31,7 +31,7 @@ def test_input_types_required_fields():
     required_keys = list(required.keys())
 
     expected = [
-        "vae", "model", "conditioning", "controlnet",
+        "vae", "model", "conditioning", "control_net",
         "folder_name", "strength_openpose", "strength_openpose_hand",
         "strength_openpose_full", "strength_canny", "strength_depth",
         "strength_normal"
@@ -48,7 +48,7 @@ def test_input_types_required_field_types():
     assert required["vae"][0] == "COMBO", "vae should be COMBO dropdown"
     assert required["model"][0] == "MODEL", "model should be MODEL"
     assert required["conditioning"][0] == "CONDITIONING", "conditioning should be CONDITIONING"
-    assert required["controlnet"][0] == "COMBO", "controlnet should be COMBO dropdown"
+    assert required["control_net"][0] == "COMBO", "control_net should be COMBO dropdown"
     assert required["folder_name"][0] == "STRING", "folder_name should be STRING"
     assert required["strength_openpose"][0] == "FLOAT", "strength_openpose should be FLOAT"
     assert required["strength_openpose_hand"][0] == "FLOAT", "strength_openpose_hand should be FLOAT"
@@ -130,7 +130,7 @@ def test_controlnet_dropdown_auto_discovers_models():
     """Test that ControlNet dropdown lists available controlnet models."""
     input_types = AdvancedOpenposeLoader.INPUT_TYPES()
     required = input_types["required"]
-    cn_options = required["controlnet"][1]["options"]
+    cn_options = required["control_net"][1]["options"]
 
     # Should list at least one controlnet model
     assert len(cn_options) > 0, "ControlNet dropdown should have at least one model"
@@ -172,7 +172,7 @@ def test_function_executes_complete_pipeline():
             vae_name="flux2-vae.safetensors",
             model=model,
             conditioning=conditioning,
-            controlnet_name="test-controlnet.safetensors",
+            control_net="test-controlnet.safetensors",
             folder_name="test",
             strength_openpose=0.75,
             strength_openpose_hand=0.80,
