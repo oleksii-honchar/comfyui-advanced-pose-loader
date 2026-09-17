@@ -91,16 +91,11 @@ class AdvancedOpenposeLoader:
                     "values": cn_options,
                     "default": cn_default,
                 }),
-                "pose_folder_name": ("COMBO", {
-                    "values": folder_options,
-                    "default": folder_default,
+                "pose_folder_name": ("STRING", {
+                    "default": "1_sitting-on-desk_1",
                 }),
             },
             "optional": {
-                "pose_types": ("STRING", {
-                    "default": "openpose,openpose_hand,openpose_full",
-                    "multiline": False,
-                }),
                 "openpose_strength": ("FLOAT", {
                     "default": 0.75, "min": 0.0, "max": 2.0, "step": 0.01
                 }),
@@ -137,7 +132,7 @@ class AdvancedOpenposeLoader:
     CATEGORY = "AdvancedPoseLoader"
 
     def execute(self, model, conditioning, pose_folder_name, vae, control_net,
-                pose_types=None, openpose_strength=0.75, openpose_hand_strength=0.80,
+                openpose_strength=0.75, openpose_hand_strength=0.80,
                 openpose_full_strength=0.85, canny_strength=0.0, depth_strength=0.0,
                 normal_strength=0.0, spatial_fade=False, spatial_fade_strength=1.0,
                 debug=False):
@@ -153,8 +148,9 @@ class AdvancedOpenposeLoader:
         # Step 2: Load pose images
         available_images = list_pose_images(pose_folder)
         pose_images = {}
-        for pose_type, file_path in available_images.items():
-            pose_images[pose_type] = load_pose_image(file_path)
+        for pose_type in POSE_TYPES:
+            if pose_type in available_images:
+                pose_images[pose_type] = load_pose_image(available_images[pose_type])
 
         if not pose_images:
             raise ValueError(f"No pose images found in {pose_folder}")
