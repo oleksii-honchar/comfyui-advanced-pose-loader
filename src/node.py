@@ -137,9 +137,11 @@ class AdvancedOpenposeLoader:
             if debug:
                 logger.info(f"[AdvancedOpenposeLoader] Encoding pose: {pose_type}")
             latent = encode_pose_image(vae_model, pose_image)
+            # Convert boolean spatial_fade to fade_mode string
+            fade_mode = "top" if spatial_fade else "none"
             context = build_control_context(
                 latent,
-                fade_mode=spatial_fade,
+                fade_mode=fade_mode,
                 fade_strength=spatial_fade_strength
             )
             control_contexts[pose_type] = context
