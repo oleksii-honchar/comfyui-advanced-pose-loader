@@ -182,6 +182,7 @@ class AdvancedOpenposeWrapper:
         self.poses = []  # List of (pose_type, context) tuples
         self.previous_controlnet = None
         self.extra_hooks = None  # Required by ComfyUI's get_hooks_from_cond
+        self.multigpu_clones = {}  # Required by Better-ComfyUI's multi-GPU support
     
     def get_extra_hooks(self):
         """Return extra hooks for the controlnet.
