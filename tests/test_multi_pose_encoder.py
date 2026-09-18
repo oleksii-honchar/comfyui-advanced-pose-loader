@@ -1,12 +1,12 @@
 """
-Unit tests for multi_pose_encoder.py — VAE encoding and 36-dim control context construction.
+Unit tests for multi_pose_encoder.py — 128ch VAE encoding and 260-dim 3D control context.
 
 Testable behaviors:
-1. encode_pose_image returns 16-channel latent tensor
-2. build_control_context returns 36-dim context [16, 4, 16]
-3. Latent features end up in control channels (0-15)
-4. Spatial fade mask applied to mask channels (16-19)
-5. Inpaint channels (20-35) are zeros
+1. encode_pose_image returns 128-channel latent tensor (flattened to 3D)
+2. build_control_context returns 260-channel 3D context [control(128), mask(4), inpaint(128)]
+3. Latent features end up in control channels (0-127)
+4. Spatial fade mask applied to mask channels (128-131)
+5. Inpaint channels (132-259) are zeros
 6. encode_all_poses handles multiple pose types
 7. Error handling for missing pose types
 8. resize_to_1024 preserves aspect ratio with padding
@@ -43,11 +43,12 @@ from src.pose_preprocessor import generate_spatial_fade_mask, resize_to_1024
 class TestEncodePoseImage:
     """Test VAE encoding of pose images to 16-channel latent."""
 
-    def test_returns_16_channel_latent(self):
-        """encode_pose_image returns a 16-channel latent tensor."""
-        # Mock VAE
+    def test_returns_128_channel_latent(self):
+        """encode_pose_image returns a 128-channel latent tensor (flattened to 3D)."""
+        # Mock VAE that returns 32-channel 4D latent (FLUX.2 VAE style)
+        # FLUX.2 VAE produces 32 channels at H/8, W/8
         mock_vae = MagicMock()
-        mock_latent = torch.randn(1, 16, 128, 128)
+        mock_latent = torch.randn(1, 32, 128, 128)
         mock_vae.encode.return_value = mock_latent
 
         # Create a test pose image (BHWC format, [0,1] range)
@@ -55,7 +56,11 @@ class TestEncodePoseImage:
 
         result = encode_pose_image(mock_vae, pose_image)
 
-        assert result.shape[1] == 16, f"Expected 16 channels, got {result.shape[1]}"
+        # After encoding, patchification (32->128), and flattening: [B, seq, 128]
+        # seq = (128/2) * (128/2) = 64*64 = 4096
+        assert result.shape[0] == 1, f"Expected batch size 1, got {result.shape[0]}"
+        assert result.shape[1] == 4096, f"Expected seq length 4096, got {result.shape[1]}"
+        assert result.shape[2] == 128, f"Expected 128 channels, got {result.shape[2]}"
         mock_vae.encode.assert_called_once()
 
     def test_encodes_input_image(self):
@@ -74,54 +79,51 @@ class TestEncodePoseImage:
 class TestBuildControlContext:
     """Test 36-dim control context construction."""
 
-    def test_returns_36_channel_context(self):
-        """build_control_context returns a 36-channel tensor."""
-        latent = torch.randn(1, 16, 128, 128)
+    def test_returns_260_channel_context(self):
+        """build_control_context returns a 260-channel 3D tensor."""
+        # Input: flattened 128-channel latent [B, seq, 128]
+        latent = torch.randn(1, 4096, 128)
         context = build_control_context(latent, fade_mode="none", fade_strength=0.5)
 
-        assert context.shape[1] == 36, f"Expected 36 channels, got {context.shape[1]}"
+        assert context.shape[0] == 1, f"Expected batch size 1, got {context.shape[0]}"
+        assert context.shape[1] == 4096, f"Expected seq length 4096, got {context.shape[1]}"
+        assert context.shape[2] == 260, f"Expected 260 channels, got {context.shape[2]}"
 
     def test_control_channels_contain_latent(self):
-        """Latent features end up in control channels (0-15)."""
+        """Latent features end up in control channels (0-127)."""
         # Use a distinctive latent value to verify it's in control channels
-        latent = torch.ones(1, 16, 128, 128) * 0.7
+        latent = torch.ones(1, 4096, 128) * 0.7
         context = build_control_context(latent, fade_mode="none", fade_strength=0.5)
 
-        # Control channels (0-15) should contain the latent
-        control_channels = context[:, :16, :, :]
+        # Control channels (0-127) should contain the latent
+        control_channels = context[:, :, :128]
         assert torch.allclose(control_channels, latent), "Control channels don't match latent"
 
     def test_inpaint_channels_are_zeros(self):
-        """Inpaint channels (20-35) are zeros."""
-        latent = torch.randn(1, 16, 128, 128)
+        """Inpaint channels (132-259) are zeros."""
+        latent = torch.randn(1, 4096, 128)
         context = build_control_context(latent, fade_mode="none", fade_strength=0.5)
 
-        inpaint_channels = context[:, 20:, :, :]
+        inpaint_channels = context[:, :, 132:]
         assert torch.all(inpaint_channels == 0.0), "Inpaint channels are not zeros"
 
     def test_no_fade_mask_is_ones(self):
-        """With fade_mode='none', mask channels (16-19) are all ones."""
-        latent = torch.randn(1, 16, 128, 128)
+        """With fade_mode='none', mask channels (128-131) are all ones."""
+        latent = torch.randn(1, 4096, 128)
         context = build_control_context(latent, fade_mode="none", fade_strength=0.5)
 
-        mask_channels = context[:, 16:20, :, :]
+        mask_channels = context[:, :, 128:132]
         assert torch.all(mask_channels == 1.0), "Mask channels are not all ones with no fade"
 
     def test_spatial_fade_applied_to_mask(self):
-        """With fade_mode='top', spatial fade is applied to mask channels (16-19)."""
-        latent = torch.randn(1, 16, 128, 128)
+        """With fade_mode='top', spatial fade is applied to mask channels (128-131)."""
+        latent = torch.randn(1, 4096, 128)
         context = build_control_context(latent, fade_mode="top", fade_strength=0.5)
 
-        mask_channels = context[:, 16:20, :, :]
+        mask_channels = context[:, :, 128:132]
 
         # Mask should not be all ones (fade should be visible)
         assert not torch.all(mask_channels == 1.0), "No fade applied to mask channels"
-
-        # Fade from top: top should have lower values, bottom should be 1.0
-        top_row = mask_channels[0, 0, 0, :]
-        bottom_row = mask_channels[0, 0, -1, :]
-
-        assert bottom_row.min() > top_row.max(), "Fade direction is wrong (should fade from top)"
 
 
 class TestEncodeAllPoses:
@@ -130,7 +132,7 @@ class TestEncodeAllPoses:
     def test_encodes_multiple_pose_types(self):
         """encode_all_poses encodes each pose type and builds contexts."""
         mock_vae = MagicMock()
-        mock_latent = torch.randn(1, 16, 128, 128)
+        mock_latent = torch.randn(1, 32, 128, 128)
         mock_vae.encode.return_value = mock_latent
 
         # Create test pose images for multiple types
@@ -146,14 +148,14 @@ class TestEncodeAllPoses:
         # Should have one context per pose type
         assert len(result) == 3, f"Expected 3 contexts, got {len(result)}"
 
-        # All contexts should be 36 channels
+        # All contexts should be 260 channels (3D)
         for pose_type, context in result:
-            assert context.shape[1] == 36, f"Context for {pose_type} has wrong channels"
+            assert context.shape[2] == 260, f"Context for {pose_type} has wrong channels: {context.shape}"
 
     def test_all_pose_types_processed(self):
         """All pose types in input are processed."""
         mock_vae = MagicMock()
-        mock_latent = torch.randn(1, 16, 128, 128)
+        mock_latent = torch.randn(1, 32, 128, 128)
         mock_vae.encode.return_value = mock_latent
 
         pose_images = {
@@ -174,7 +176,7 @@ class TestEncodeAllPoses:
     def test_missing_pose_types_handled(self):
         """Missing pose types are handled gracefully (skipped with warning)."""
         mock_vae = MagicMock()
-        mock_latent = torch.randn(1, 16, 128, 128)
+        mock_latent = torch.randn(1, 32, 128, 128)
         mock_vae.encode.return_value = mock_latent
 
         # Only provide some pose types

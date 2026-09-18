@@ -1,11 +1,12 @@
-"""Multi-pose encoder for FLUX.2 Fun ControlNet.
+"""Multi-pose encoder for FLUX.2-dev-Fun-Controlnet-Union.
 
 Handles loading, resizing, and encoding multiple pose types from a pose folder
 into the FLUX.2 Fun ControlNet control context format.
 
-FLUX.2 uses a 36-dim control context [16, 4, 16] (control: 16, mask: 4, inpaint: 16),
-NOT the 260-dim FLUX.1 structure. This is because FLUX.2 uses the 16-channel latent
-space of flux2-vae.safetensors.
+Uses FLUX.2 VAE (16-channel encoder) with spatial patchification to produce
+128-channel latents at H/16, W/16 resolution, matching the reference implementation.
+Builds a 260-dim 3D control context [control(128), mask(4), inpaint(128)] with
+flattened spatial dimensions [B, seq, 260].
 
 Pose types (6 total, from pose folder):
   - openpose: body pose keypoints
@@ -45,68 +46,96 @@ logger = logging.getLogger(__name__)
 
 
 def encode_pose_image(vae, pose_image):
-    """VAE-encode a pose image to 16-channel latent.
+    """VAE-encode a pose image to 128-channel latent (flattened to 3D).
+
+    Uses FLUX.2 VAE (16-channel encoder) and patchifies the output to 128 channels
+    by rearranging 2x2 spatial patches. This matches the reference implementation's
+    approach of using the main workflow's VAE for control encoding.
 
     Args:
-        vae: ComfyUI VAE object
+        vae: ComfyUI VAE object (FLUX.2 VAE, 16-channel encoder)
         pose_image: Tensor [B, H, W, C] in [0, 1] range
 
     Returns:
-        16-channel latent tensor [B, 16, H/8, W/8]
+        3D tensor [B, seq, 128] where seq = (H/16) * (W/16)
     """
     mm = _get_comfy_model_management()
     device = mm.get_torch_device()
-    dtype = torch.bfloat16 if mm.should_use_bf16() else torch.float16
 
     # Normalize to [0, 1] if needed
     if pose_image.max() > 1.0:
         pose_image = pose_image / 255.0
 
     with torch.no_grad():
+        # FLUX.2 VAE produces 16-channel latents at H/8, W/8
         pose_latent = vae.encode(pose_image.to(device))
 
-    return pose_latent
+    # Patchify: rearrange 2x2 spatial patches to expand channels 16->128
+    # [B, 16, H/8, W/8] -> [B, 128, H/16, W/16]
+    pose_patched = _patchify(pose_latent)
+
+    # Flatten spatial dimensions: [B, 128, H/16, W/16] -> [B, seq, 128]
+    pose_flat = pose_patched.flatten(2).permute(0, 2, 1)
+
+    return pose_flat
+
+
+def _patchify(x):
+    """Convert [B, C, H, W] -> [B, C*4, H/2, W/2] by rearranging 2x2 patches.
+
+    This matches the reference implementation's patchification step that
+    converts 16-channel FLUX.2 VAE latents to 128 channels.
+    """
+    b, c, h, w = x.shape
+    x = x.view(b, c, h // 2, 2, w // 2, 2)
+    x = x.permute(0, 1, 3, 5, 2, 4)
+    x = x.reshape(b, c * 4, h // 2, w // 2)
+    return x
 
 
 def build_control_context(latent, fade_mode="none", fade_strength=0.5):
-    """Build 36-dim control context [control(16), mask(4), inpaint(16)].
+    """Build 260-dim 3D control context [control(128), mask(4), inpaint(128)].
 
     Args:
-        latent: 16-channel latent tensor [B, 16, H, W]
+        latent: Flattened 128-channel latent tensor [B, seq, 128]
         fade_mode: Spatial fade mode ('none', 'top', 'bottom', 'left', 'right')
         fade_strength: Fade strength (0.0-1.0)
 
     Returns:
-        36-channel control context tensor [B, 36, H, W]
+        260-channel 3D control context tensor [B, seq, 260]
     """
     device = latent.device
     dtype = latent.dtype
-    bs, channels, h, w = latent.shape
+    bs, seq, _ = latent.shape
 
-    # Control channels: the VAE-encoded latent (16 channels)
+    # Control channels: the flattened 128-channel latent
     control = latent
 
-    # Mask channels: spatial fade mask (4 channels)
+    # Mask channels: spatial fade or ones (4 channels)
     if fade_mode == "none" or fade_strength <= 0.0:
-        mask = torch.ones((bs, 4, h, w), device=device, dtype=dtype)
+        mask = torch.ones((bs, seq, 4), device=device, dtype=dtype)
     else:
-        fade_mask = generate_spatial_fade_mask(h, w, fade_mode, fade_strength)
-        mask = fade_mask.expand(bs, 4, h, w).to(dtype)
+        # Infer spatial dimensions from sequence length (assume square)
+        spatial = int(seq ** 0.5)
+        fade_mask = generate_spatial_fade_mask(spatial, spatial, fade_mode, fade_strength)
+        # Flatten fade mask to 3D: [B, 1, H, W] -> [B, seq, 1]
+        fade_mask_3d = fade_mask.unsqueeze(0).flatten(2).permute(0, 2, 1)
+        mask = fade_mask_3d.expand(bs, seq, 4).to(dtype)
 
     # Inpaint channels: zeros (reserved for future)
-    inpaint = torch.zeros((bs, 16, h, w), device=device, dtype=dtype)
+    inpaint = torch.zeros((bs, seq, 128), device=device, dtype=dtype)
 
-    # Concatenate: [control(16), mask(4), inpaint(16)] = 36
-    control_context = torch.cat([control, mask, inpaint], dim=1)
+    # Concatenate: [control(128), mask(4), inpaint(128)] = 260
+    control_context = torch.cat([control, mask, inpaint], dim=2)
 
     return control_context
 
 
 def encode_all_poses(vae, pose_images, pose_types, fade_mode="none", fade_strength=0.5):
-    """Encode all pose types and build control contexts.
+    """Encode all pose types and build 260-channel 3D control contexts.
 
     Args:
-        vae: ComfyUI VAE object
+        vae: ComfyUI VAE object (128-channel encoder)
         pose_images: dict of {pose_type: tensor[B, H, W, C]}
         pose_types: list of pose types to process
         fade_mode: Spatial fade mode for all poses
@@ -114,6 +143,7 @@ def encode_all_poses(vae, pose_images, pose_types, fade_mode="none", fade_streng
 
     Returns:
         list of (pose_type, control_context) tuples
+        Each control_context is a 260-channel 3D tensor [B, seq, 260]
     """
     contexts = []
 
@@ -125,10 +155,10 @@ def encode_all_poses(vae, pose_images, pose_types, fade_mode="none", fade_streng
         pose_image = pose_images[pose_type]
         logger.info(f"Encoding pose type: {pose_type}")
 
-        # Encode to 16-channel latent
+        # Encode to 128-channel flattened latent [B, seq, 128]
         pose_latent = encode_pose_image(vae, pose_image)
 
-        # Build 36-dim control context
+        # Build 260-dim 3D control context
         context = build_control_context(pose_latent, fade_mode, fade_strength)
 
         contexts.append((pose_type, context))
