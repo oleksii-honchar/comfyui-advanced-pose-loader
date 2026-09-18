@@ -223,11 +223,14 @@ class AdvancedOpenposeWrapper:
                     continue
                 # Estimate dimensions from context shape
                 if context is not None:
-                    b, c, h, w = context.shape
+                    # Context is 3D: [B, seq, 260]
+                    b, seq, _ = context.shape
+                    # seq = (H/16) * (W/16), assume square
+                    side = int(seq ** 0.5)
                     transformer_options['flux2_fun_controlnets'].append(self.controlnet)
                     transformer_options['flux2_fun_control_contexts'].append(context)
                     transformer_options['flux2_fun_control_scales'].append(strength)
-                    transformer_options['flux2_fun_ctrl_dims'].append((h // 2, w // 2))
+                    transformer_options['flux2_fun_ctrl_dims'].append((side, side))
         
         output = {"input": [], "output": []}
         if control_prev:
